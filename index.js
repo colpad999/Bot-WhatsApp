@@ -10,6 +10,8 @@ import pino from "pino"
 import qrcode from "qrcode-terminal"
 import dotenv from "dotenv"
 
+import { handleCaptcha } from "./src/menu/group.js"
+import { getGroup } from "./src/core/database.js"
 import { router } from "./src/core/router.js"
 import { createContext } from "./src/core/context.js"
 
@@ -29,6 +31,19 @@ async function startBot() {
       printQRInTerminal: false,
       browser: ["Colpad Bot Stable", "Chrome", "1.0.0"]
     })
+
+    sock.ev.on("group-participants.update", async (anu) => {
+  const { id, participants, action } = anu
+
+  const group = getGroup(id)
+  if (!group.welcome) return
+
+  for (let user of participants) {
+    if (action === "add") {
+      await handleCaptcha(sock, id, user)
+    }
+  }
+})
 
     // ===============================
     // CONNECTION
