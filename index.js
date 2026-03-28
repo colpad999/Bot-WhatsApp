@@ -86,6 +86,29 @@ async function startBot() {
       }
     })
 
+    sock.ev.on("group-participants.update", async (anu) => {
+  const { id, participants, action } = anu
+
+  const group = getGroup(id)
+  if (!group.welcome) return
+
+  for (let user of participants) {
+    if (action === "add") {
+      await sock.sendMessage(id, {
+        text: `👋 Welcome @${user.split("@")[0]}`,
+        mentions: [user]
+      })
+    }
+
+    if (action === "remove") {
+      await sock.sendMessage(id, {
+        text: `👋 Goodbye @${user.split("@")[0]}`,
+        mentions: [user]
+      })
+    }
+  }
+})
+
     // ===============================
     // SAVE SESSION
     // ===============================
