@@ -4,7 +4,6 @@ import config from "../../config.js"
 import { handleTools } from "../menu/tools.js"
 import { handleOwner } from "../menu/owner.js"
 import { handleMain } from "../menu/main.js"
-import { groupProtector, checkCaptcha } from "../menu/group.js"
 
 const spam = new Map()
 
