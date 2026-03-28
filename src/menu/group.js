@@ -1,12 +1,149 @@
 // File: src/menu/group.js
 
 import { reply } from "../lib/message.js"
-import { getGroup, saveDB, getCaptcha } from "../core/database.js"
+import { getGroup, saveDB } from "../core/database.js"
 
 const spam = new Map()
 const badwords = ["anjing", "kontol", "memek"]
-const linkRegex = /(https?:\/\/|wa\.me|chat\.whatsapp\.com)/i
 
+export async function handleGroup(ctx, cmd, args) {
+  try {
+    const { sock, msg, sender, text } = ctx
+    const jid = msg.key.remoteJid
+
+    if (!jid.endsWith("@g.us")) {
+      return reply(ctx, "❌ Khusus grup!")
+    }
+
+    const metadata = await sock.groupMetadata(jid)
+    const participants = metadata.participants
+
+    const isAdmin = participants.find(v => v.id === sender && v.admin)
+
+    if (!isAdmin) return reply(ctx, "❌ Admin only!")
+
+    const group = getGroup(jid)
+
+    // ===============================
+    // ⚙️ TOGGLE FITUR
+    // ===============================
+    if (cmd === "antilink") {
+      group.antiLink = args[0] === "on"
+      saveDB()
+      return reply(ctx, `AntiLink: ${group.antiLink}`)
+    }
+
+    if (cmd === "antispam") {
+      group.antiSpam = args[0] === "on"
+      saveDB()
+      return reply(ctx, `AntiSpam: ${group.antiSpam}`)
+    }
+
+    if (cmd === "badword") {
+      group.badword = args[0] === "on"
+      saveDB()
+      return reply(ctx, `Badword: ${group.badword}`)
+    }
+
+    if (cmd === "welcome") {
+      group.welcome = args[0] === "on"
+      saveDB()
+      return reply(ctx, `Welcome: ${group.welcome}`)
+    }
+
+    // ===============================
+    // 👥 KICK
+    // ===============================
+    if (cmd === "kick") {
+      const target = msg.message?.extendedTextMessage?.contextInfo?.mentionedJid
+      if (!target) return reply(ctx, "Tag user!")
+
+      await sock.groupParticipantsUpdate(jid, target, "remove")
+      return reply(ctx, "✅ Kick berhasil")
+    }
+
+    // ===============================
+    // ➕ ADD
+    // ===============================
+    if (cmd === "add") {
+      if (!args[0]) return reply(ctx, "Masukkan nomor!")
+
+      const number = args[0].replace(/[^0-9]/g, "") + "@s.whatsapp.net"
+
+      await sock.groupParticipantsUpdate(jid, [number], "add")
+      return reply(ctx, "✅ Berhasil tambah")
+    }
+
+    // ===============================
+    // ⬆️ PROMOTE
+    // ===============================
+    if (cmd === "promote") {
+      const target = msg.message?.extendedTextMessage?.contextInfo?.mentionedJid
+      if (!target) return reply(ctx, "Tag user!")
+
+      await sock.groupParticipantsUpdate(jid, target, "promote")
+      return reply(ctx, "✅ Jadi admin")
+    }
+
+    // ===============================
+    // ⬇️ DEMOTE
+    // ===============================
+    if (cmd === "demote") {
+      const target = msg.message?.extendedTextMessage?.contextInfo?.mentionedJid
+      if (!target) return reply(ctx, "Tag user!")
+
+      await sock.groupParticipantsUpdate(jid, target, "demote")
+      return reply(ctx, "✅ Turun admin")
+    }
+
+    // ===============================
+    // 🔓 OPEN
+    // ===============================
+    if (cmd === "open") {
+      await sock.groupSettingUpdate(jid, "not_announcement")
+      return reply(ctx, "✅ Grup dibuka")
+    }
+
+    // ===============================
+    // 🔒 CLOSE
+    // ===============================
+    if (cmd === "close") {
+      await sock.groupSettingUpdate(jid, "announcement")
+      return reply(ctx, "✅ Grup ditutup")
+    }
+
+    // ===============================
+    // 📢 TAG ALL
+    // ===============================
+    if (cmd === "tagall") {
+      let teks = "📢 Tag All:\n\n"
+      const mentions = participants.map(v => v.id)
+
+      participants.forEach((v, i) => {
+        teks += `${i + 1}. @${v.id.split("@")[0]}\n`
+      })
+
+      await sock.sendMessage(jid, { text: teks, mentions })
+    }
+
+    // ===============================
+    // 👻 HIDETAG
+    // ===============================
+    if (cmd === "hidetag") {
+      const teks = args.join(" ") || "👻"
+      const mentions = participants.map(v => v.id)
+
+      await sock.sendMessage(jid, { text: teks, mentions })
+    }
+
+  } catch (err) {
+    return reply(ctx, "❌ Error: " + err.message)
+  }
+}
+
+// ===============================
+// 🔥 PROTEKSI AUTO
+// ===============================
 export async function groupProtector(ctx) {
   try {
     const { sock, msg, sender, text } = ctx
@@ -18,30 +155,16 @@ export async function groupProtector(ctx) {
     const participants = metadata.participants
 
     const isAdmin = participants.find(v => v.id === sender && v.admin)
-    const isOwner = sender.includes(process.env.OWNER_NUMBER)
+    if (isAdmin) return
 
     const group = getGroup(jid)
 
-    // 🛡 WHITELIST
-    if (isAdmin || isOwner) return
-
-    // ===============================
-    // 🚫 SMART ANTI LINK
-    // ===============================
-    if (group.antiLink && linkRegex.test(text)) {
-      await sock.sendMessage(jid, {
-        text: `🚫 Link detected @${sender.split("@")[0]}`,
-        mentions: [sender]
-      })
-
-      setTimeout(async () => {
-        await sock.groupParticipantsUpdate(jid, [sender], "remove")
-      }, 2000)
+    // 🚫 ANTI LINK
+    if (group.antiLink && text.includes("http")) {
+      await sock.groupParticipantsUpdate(jid, [sender], "remove")
     }
 
-    // ===============================
     // 🔞 BADWORD
-    // ===============================
     if (group.badword) {
       for (let word of badwords) {
         if (text.toLowerCase().includes(word)) {
@@ -50,16 +173,14 @@ export async function groupProtector(ctx) {
       }
     }
 
-    // ===============================
-    // 🧠 ANTI SPAM SUPER
-    // ===============================
+    // 🧠 ANTI SPAM
     if (group.antiSpam) {
       const now = Date.now()
 
       if (!spam.has(sender)) spam.set(sender, [])
-      const logs = spam.get(sender).filter(t => now - t < 4000)
+      const logs = spam.get(sender).filter(t => now - t < 5000)
 
-      if (logs.length >= 4) {
+      if (logs.length >= 5) {
         await sock.groupParticipantsUpdate(jid, [sender], "remove")
       }
 
@@ -68,51 +189,6 @@ export async function groupProtector(ctx) {
     }
 
   } catch (err) {
-    console.log("Protector:", err.message)
-  }
-}
-
-// ===============================
-// 🔢 CAPTCHA SYSTEM
-// ===============================
-export async function handleCaptcha(sock, id, user) {
-  const captcha = getCaptcha()
-
-  const a = Math.floor(Math.random() * 10)
-  const b = Math.floor(Math.random() * 10)
-
-  captcha[user] = a + b
-
-  await sock.sendMessage(id, {
-    text: `🔢 CAPTCHA untuk @${user.split("@")[0]}\n\n${a} + ${b} = ? (reply dalam 30 detik)`,
-    mentions: [user]
-  })
-
-  setTimeout(async () => {
-    if (captcha[user]) {
-      delete captcha[user]
-      await sock.groupParticipantsUpdate(id, [user], "remove")
-    }
-  }, 30000)
-}
-
-// ===============================
-// 🔢 VALIDASI CAPTCHA
-// ===============================
-export function checkCaptcha(ctx) {
-  const captcha = getCaptcha()
-  const { sender, text } = ctx
-
-  if (captcha[sender]) {
-    if (parseInt(text) === captcha[sender]) {
-      delete captcha[sender]
-      ctx.sock.sendMessage(ctx.msg.key.remoteJid, {
-        text: `✅ Verifikasi berhasil`
-      })
-    } else {
-      ctx.sock.sendMessage(ctx.msg.key.remoteJid, {
-        text: `❌ Salah!`
-      })
-    }
+    console.log("Protector error:", err.message)
   }
 }
